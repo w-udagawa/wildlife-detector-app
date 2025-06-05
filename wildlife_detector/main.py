@@ -24,7 +24,7 @@ except ImportError:
     print("pip install PySide6")
     sys.exit(1)
 
-from gui.main_window import MainWindow
+from .gui.main_window import MainWindow
 
 class WildlifeDetectorApp:
     """Wildlife Detector アプリケーションクラス"""
@@ -73,13 +73,12 @@ class WildlifeDetectorApp:
                 missing_packages.append(package)
                 self.logger.error(f"✗ {package} - 未インストール")
         
-        # SpeciesNetの特別チェック
+        # SpeciesNetの特別チェック（オプション）
         try:
             import speciesnet
             self.logger.info("✓ speciesnet - OK")
         except ImportError:
-            missing_packages.append('speciesnet')
-            self.logger.error("✗ speciesnet - 未インストール")
+            self.logger.warning("⚠️ speciesnet - 未インストール（モックモードで動作）")
         
         if missing_packages:
             self.show_dependency_error(missing_packages)
@@ -91,9 +90,9 @@ class WildlifeDetectorApp:
         """依存関係エラーの表示"""
         app = QApplication(sys.argv) if not QApplication.instance() else QApplication.instance()
         
-        error_msg = "以下のパッケージがインストールされていません:\\n\\n"
-        error_msg += "\\n".join([f"• {pkg}" for pkg in missing_packages])
-        error_msg += "\\n\\n次のコマンドでインストールしてください:\\n"
+        error_msg = "以下のパッケージがインストールされていません:\n\n"
+        error_msg += "\n".join([f"• {pkg}" for pkg in missing_packages])
+        error_msg += "\n\n次のコマンドでインストールしてください:\n"
         error_msg += "pip install " + " ".join(missing_packages)
         
         msg_box = QMessageBox()
@@ -118,9 +117,9 @@ class WildlifeDetectorApp:
         splash.setFont(font)
         
         splash.showMessage(
-            "Wildlife Detector\\n\\n"
-            "野生生物検出アプリケーション\\n"
-            "Powered by Google SpeciesNet\\n\\n"
+            "Wildlife Detector\n\n"
+            "野生生物検出アプリケーション\n"
+            "Powered by Google SpeciesNet\n\n"
             "初期化中...",
             Qt.AlignCenter | Qt.AlignBottom,
             Qt.white
@@ -146,9 +145,9 @@ class WildlifeDetectorApp:
         
         # メインウィンドウの作成
         splash.showMessage(
-            "Wildlife Detector\\n\\n"
-            "野生生物検出アプリケーション\\n"
-            "Powered by Google SpeciesNet\\n\\n"
+            "Wildlife Detector\n\n"
+            "野生生物検出アプリケーション\n"
+            "Powered by Google SpeciesNet\n\n"
             "UIを初期化中...",
             Qt.AlignCenter | Qt.AlignBottom,
             Qt.white
@@ -160,9 +159,9 @@ class WildlifeDetectorApp:
             
             # スプラッシュスクリーンを少し表示してから閉じる
             splash.showMessage(
-                "Wildlife Detector\\n\\n"
-                "野生生物検出アプリケーション\\n"
-                "Powered by Google SpeciesNet\\n\\n"
+                "Wildlife Detector\n\n"
+                "野生生物検出アプリケーション\n"
+                "Powered by Google SpeciesNet\n\n"
                 "準備完了!",
                 Qt.AlignCenter | Qt.AlignBottom,
                 Qt.white
@@ -194,7 +193,7 @@ class WildlifeDetectorApp:
         msg_box.setIcon(QMessageBox.Critical)
         msg_box.setWindowTitle("Wildlife Detector - 初期化エラー")
         msg_box.setText("アプリケーションの初期化に失敗しました")
-        msg_box.setDetailedText(f"エラー詳細:\\n{error_message}")
+        msg_box.setDetailedText(f"エラー詳細:\n{error_message}")
         msg_box.exec()
     
     def run(self) -> int:
@@ -237,7 +236,7 @@ def main():
     app = WildlifeDetectorApp()
     exit_code = app.run()
     
-    print("\\nWildlife Detector を終了しました")
+    print("\nWildlife Detector を終了しました")
     return exit_code
 
 if __name__ == "__main__":
