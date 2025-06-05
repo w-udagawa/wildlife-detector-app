@@ -1,4 +1,3 @@
-speciesnet>=1.0.0
 PySide6>=6.5.0
 numpy>=1.21.0
 opencv-python>=4.6.0
