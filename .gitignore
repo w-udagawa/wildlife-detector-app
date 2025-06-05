@@ -1,0 +1,72 @@
+# Wildlife Detector - Git ignore file
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+wildlife_env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Wildlife Detector specific
+*.log
+test_output/
+temp/
+cache/
+models/
+*.spec
+
+# Config files (may contain sensitive data)
+*config*.json
+!*config*example*.json
+
+# Large files
+*.zip
+*.tar.gz
+*.7z
+
+# Test files
+test_*.csv
+test_images/
+sample_data/
+
+# Build artifacts
+WildlifeDetector.spec
+WildlifeDetector_v*.zip
