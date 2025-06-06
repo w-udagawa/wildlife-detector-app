@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem,
     QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox, QGroupBox,
     QSplitter, QFrame, QScrollArea, QApplication, QStatusBar,
-    QMenuBar, QToolBar, QAction
+    QMenuBar, QToolBar
 )
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QSize
-from PySide6.QtGui import QFont, QIcon, QPixmap, QPalette, QColor
+from PySide6.QtGui import QFont, QIcon, QPixmap, QPalette, QColor, QAction
 
 from ..core.config import ConfigManager, AppConfig
 from ..core.species_detector import SpeciesDetector, DetectionResult
@@ -785,9 +785,9 @@ class MainWindow(QMainWindow):
             # 種名（最も信頼度の高いもの）
             if result.detections:
                 best = result.get_best_detection()
-                species_name = best.common_name if best else "不明"
-                confidence = best.confidence if best else 0.0
-                category = best.category if best else "不明"
+                species_name = best['common_name'] if best else "不明"
+                confidence = best['confidence'] if best else 0.0
+                category = best['category'] if best else "不明"
             else:
                 species_name = "検出なし"
                 confidence = 0.0
@@ -812,8 +812,8 @@ class MainWindow(QMainWindow):
             confidences = []
             for result in self.results:
                 for detection in result.detections:
-                    if detection.common_name == species:
-                        confidences.append(detection.confidence)
+                    if detection['common_name'] == species:
+                        confidences.append(detection['confidence'])
             
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
             self.species_table.setItem(i, 2, QTableWidgetItem(f"{avg_confidence:.3f}"))
