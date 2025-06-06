@@ -55,19 +55,45 @@ class BatchProgress:
             return 0.0
         return (self.success / self.processed) * 100
 
+@dataclass
+class ProcessingStats:
+    """処理統計情報"""
+    total_images: int = 0
+    processed_images: int = 0
+    successful_detections: int = 0
+    failed_detections: int = 0
+    total_detections: int = 0
+    processing_time: float = 0.0
+    average_time_per_image: float = 0.0
+    species_counts: Dict[str, int] = field(default_factory=dict)
+    error_counts: Dict[str, int] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict:
+        """辞書形式に変換"""
+        return {
+            'total_images': self.total_images,
+            'processed_images': self.processed_images,
+            'successful_detections': self.successful_detections,
+            'failed_detections': self.failed_detections,
+            'total_detections': self.total_detections,
+            'processing_time': self.processing_time,
+            'average_time_per_image': self.average_time_per_image,
+            'species_counts': self.species_counts,
+            'error_counts': self.error_counts
+        }
+
 class BatchProcessor:
     """バッチ処理エンジン"""
     
-    def __init__(self, config, species_detector: SpeciesDetector):
+    def __init__(self, config):
         """
         初期化
         
         Args:
             config: AppConfig インスタンス
-            species_detector: 種検出器インスタンス
         """
         self.config = config
-        self.detector = species_detector
+        self.detector = None
         self.logger = logging.getLogger(__name__)
         
         # 処理設定
@@ -81,50 +107,81 @@ class BatchProcessor:
         self.stop_requested = False
         
         # コールバック関数
-        self.progress_callback: Optional[Callable[[BatchProgress], None]] = None
-        self.completion_callback: Optional[Callable[[List[DetectionResult]], None]] = None
+        self.progress_callback: Optional[Callable] = None
+        self.completion_callback: Optional[Callable] = None
         
         # 結果保存
         self.results: List[DetectionResult] = []
+        self.stats: Optional[ProcessingStats] = None
         self.results_lock = threading.Lock()
+        self._start_time = 0.0
     
-    def set_progress_callback(self, callback: Callable[[BatchProgress], None]):
+    def initialize(self) -> bool:
+        """バッチ処理器の初期化"""
+        try:
+            # SpeciesDetectorの初期化
+            self.detector = SpeciesDetector(self.config)
+            if not self.detector.initialize():
+                self.logger.error("SpeciesDetector の初期化に失敗しました")
+                return False
+            
+            self.logger.info("BatchProcessor が初期化されました")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"BatchProcessor 初期化エラー: {str(e)}")
+            return False
+    
+    def cleanup(self):
+        """リソースのクリーンアップ"""
+        if self.detector:
+            self.detector.cleanup()
+            self.detector = None
+        self.logger.info("BatchProcessor がクリーンアップされました")
+    
+    def cancel_processing(self):
+        """処理のキャンセル"""
+        self.stop_requested = True
+        self.logger.info("バッチ処理のキャンセルが要求されました")
+    
+    def set_progress_callback(self, callback: Callable):
         """進捗更新コールバックを設定"""
         self.progress_callback = callback
     
-    def set_completion_callback(self, callback: Callable[[List[DetectionResult]], None]):
+    def set_completion_callback(self, callback: Callable):
         """完了コールバックを設定"""
         self.completion_callback = callback
     
-    def process_batch(self, image_paths: List[str], output_dir: str, job_id: str = None) -> List[DetectionResult]:
+    def process_batch(self, image_paths: List[str], progress_callback: Callable = None) -> List[DetectionResult]:
         """
         バッチ処理の実行
         
         Args:
             image_paths: 処理する画像パスのリスト
-            output_dir: 出力ディレクトリ
-            job_id: ジョブID（自動生成可能）
+            progress_callback: 進捗コールバック関数
             
         Returns:
             List[DetectionResult]: 検出結果のリスト
         """
-        if job_id is None:
-            job_id = f"batch_{int(time.time())}"
+        if not self.detector:
+            raise Exception("BatchProcessor が初期化されていません")
+        
+        job_id = f"batch_{int(time.time())}"
         
         # ジョブとプログレスの初期化
-        self.current_job = BatchJob(image_paths, output_dir, job_id)
+        self.current_job = BatchJob(image_paths, "", job_id)
         self.progress = BatchProgress(job_id, total=len(image_paths))
         self.results = []
         self.is_running = True
         self.stop_requested = False
+        self._start_time = time.time()
+        
+        if progress_callback:
+            self.progress_callback = progress_callback
         
         self.logger.info(f"バッチ処理開始: {len(image_paths)}枚の画像を処理")
-        start_time = time.time()
         
         try:
-            # 出力ディレクトリの作成
-            os.makedirs(output_dir, exist_ok=True)
-            
             # 並列処理の実行
             if self.max_workers == 1:
                 # シングルスレッド処理
@@ -133,12 +190,11 @@ class BatchProcessor:
                 # マルチスレッド処理
                 results = self._process_parallel(image_paths)
             
-            # 処理時間の更新
-            self.progress.elapsed_time = time.time() - start_time
+            # 統計情報の生成
+            self._generate_statistics(results)
             
-            # 完了コールバックの実行
-            if self.completion_callback:
-                self.completion_callback(results)
+            # 処理時間の更新
+            self.progress.elapsed_time = time.time() - self._start_time
             
             self.logger.info(f"バッチ処理完了: {self.progress.success}成功 / {self.progress.failed}失敗")
             return results
@@ -158,7 +214,13 @@ class BatchProcessor:
                 self.logger.info("処理が中断されました")
                 break
             
-            self._update_progress(current_file=os.path.basename(image_path))
+            # 進捗コールバック
+            if self.progress_callback:
+                self.progress_callback(
+                    i, len(image_paths), 
+                    "処理中", 
+                    os.path.basename(image_path)
+                )
             
             # 画像処理
             result = self.detector.detect_species(image_path)
@@ -166,12 +228,13 @@ class BatchProcessor:
             
             # 進捗更新
             self._update_progress_counts(result.success)
-            
+        
         return results
     
     def _process_parallel(self, image_paths: List[str]) -> List[DetectionResult]:
         """並列処理"""
         results = []
+        completed_count = 0
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # すべてのタスクを投入
@@ -190,13 +253,21 @@ class BatchProcessor:
                     break
                 
                 image_path = future_to_path[future]
+                completed_count += 1
                 
                 try:
                     result = future.result()
                     results.append(result)
                     
+                    # 進捗コールバック
+                    if self.progress_callback:
+                        self.progress_callback(
+                            completed_count, len(image_paths),
+                            "処理中",
+                            os.path.basename(image_path)
+                        )
+                    
                     # 進捗更新
-                    self._update_progress(current_file=os.path.basename(image_path))
                     self._update_progress_counts(result.success)
                     
                 except Exception as e:
@@ -217,22 +288,6 @@ class BatchProcessor:
         """単一画像の処理（並列処理用）"""
         return self.detector.detect_species(image_path)
     
-    def _update_progress(self, current_file: str = ""):
-        """進捗情報の更新"""
-        if self.progress:
-            if current_file:
-                self.progress.current_file = current_file
-            
-            # 残り時間の推定
-            if self.progress.processed > 0:
-                avg_time_per_image = self.progress.elapsed_time / self.progress.processed
-                remaining_images = self.progress.total - self.progress.processed
-                self.progress.estimated_remaining = avg_time_per_image * remaining_images
-            
-            # コールバックの実行
-            if self.progress_callback:
-                self.progress_callback(self.progress)
-    
     def _update_progress_counts(self, success: bool):
         """進捗カウントの更新"""
         with self.results_lock:
@@ -243,7 +298,48 @@ class BatchProcessor:
                 else:
                     self.progress.failed += 1
                 
-                self.progress.elapsed_time = time.time() - self._start_time if hasattr(self, '_start_time') else 0
+                self.progress.elapsed_time = time.time() - self._start_time
+    
+    def _generate_statistics(self, results: List[DetectionResult]):
+        """統計情報の生成"""
+        successful_detections = 0
+        total_detections = 0
+        species_counts = {}
+        error_counts = {}
+        total_processing_time = 0.0
+        
+        for result in results:
+            total_processing_time += result.processing_time
+            
+            if result.success:
+                successful_detections += 1
+                total_detections += len(result.detections)
+                
+                # 種別カウント
+                for detection in result.detections:
+                    species = detection.get('common_name', 'Unknown')
+                    species_counts[species] = species_counts.get(species, 0) + 1
+            else:
+                # エラーカウント
+                error_msg = result.error_message or 'Unknown Error'
+                error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+        
+        # 統計オブジェクトの作成
+        self.stats = ProcessingStats(
+            total_images=len(results),
+            processed_images=len(results),
+            successful_detections=successful_detections,
+            failed_detections=len(results) - successful_detections,
+            total_detections=total_detections,
+            processing_time=time.time() - self._start_time,
+            average_time_per_image=total_processing_time / len(results) if results else 0.0,
+            species_counts=species_counts,
+            error_counts=error_counts
+        )
+    
+    def get_statistics(self) -> ProcessingStats:
+        """統計情報を取得"""
+        return self.stats or ProcessingStats()
     
     def stop_processing(self):
         """処理の停止要求"""
@@ -266,21 +362,12 @@ class BatchProcessor:
     def save_results_summary(self, output_path: str):
         """結果サマリーをJSONで保存"""
         try:
-            if not self.results or not self.progress:
+            if not self.stats:
                 return
             
             summary = {
-                "job_info": {
-                    "job_id": self.progress.job_id,
-                    "total_images": self.progress.total,
-                    "processed": self.progress.processed,
-                    "success": self.progress.success,
-                    "failed": self.progress.failed,
-                    "success_rate": self.progress.success_rate,
-                    "processing_time": self.progress.elapsed_time
-                },
-                "species_summary": self._generate_species_summary(),
-                "performance_stats": self._generate_performance_stats()
+                "processing_stats": self.stats.to_dict(),
+                "timestamp": time.time()
             }
             
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -290,46 +377,6 @@ class BatchProcessor:
             
         except Exception as e:
             self.logger.error(f"結果サマリー保存エラー: {str(e)}")
-    
-    def _generate_species_summary(self) -> Dict:
-        """検出された種のサマリーを生成"""
-        species_count = {}
-        total_detections = 0
-        
-        for result in self.results:
-            if result.success and result.detections:
-                for detection in result.detections:
-                    species = detection.get('common_name', 'Unknown')
-                    species_count[species] = species_count.get(species, 0) + 1
-                    total_detections += 1
-        
-        # 上位種の取得
-        top_species = sorted(species_count.items(), key=lambda x: x[1], reverse=True)[:10]
-        
-        return {
-            "total_detections": total_detections,
-            "unique_species_count": len(species_count),
-            "top_species": [{"species": species, "count": count} for species, count in top_species],
-            "detection_rate": (len([r for r in self.results if r.detections]) / len(self.results)) * 100 if self.results else 0
-        }
-    
-    def _generate_performance_stats(self) -> Dict:
-        """パフォーマンス統計を生成"""
-        if not self.results:
-            return {}
-        
-        processing_times = [r.processing_time for r in self.results if r.processing_time > 0]
-        
-        if not processing_times:
-            return {}
-        
-        return {
-            "avg_processing_time": sum(processing_times) / len(processing_times),
-            "min_processing_time": min(processing_times),
-            "max_processing_time": max(processing_times),
-            "total_processing_time": sum(processing_times),
-            "images_per_second": len(processing_times) / sum(processing_times) if sum(processing_times) > 0 else 0
-        }
 
 class BatchImageFinder:
     """バッチ処理用画像ファイル検索"""
